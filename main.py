@@ -28,7 +28,6 @@ class Device(Base):
     ip_address = Column(String, index=True)
     is_activated = Column(Boolean, default=False)
     total_downloads = Column(Integer, default=0)
-    key_assigned = Column(String, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 Base.metadata.create_all(bind=engine)
@@ -67,12 +66,6 @@ class TrackRequest(BaseModel):
 
 class StatusRequest(BaseModel):
     device_id: str
-
-class ActivateRequest(BaseModel):
-    device_id: str
-    key: str
-
-VALID_KEYS = ["PREMIUM2026", "VIP_UNLOCK"]
 
 # ==========================================
 # CÁC API ENDPOINTS
@@ -122,35 +115,6 @@ def check_status(req: StatusRequest, request: Request, db: Session = Depends(get
         "hide_ui": is_activated,
         "is_activated": is_activated,
         "total_downloads": total_downloads
-    }
-
-@app.post("/api/activate")
-def activate(req: ActivateRequest, request: Request, db: Session = Depends(get_db)):
-    if req.key not in VALID_KEYS:
-        raise HTTPException(status_code=400, detail="Mã Key không hợp lệ hoặc đã hết hạn!")
-        
-    ip = get_client_ip(request)
-    device = db.query(Device).filter(Device.device_id == req.device_id).first()
-    
-    if not device:
-        device = Device(
-            device_id=req.device_id,
-            ip_address=ip,
-            is_activated=True,
-            key_assigned=req.key
-        )
-        db.add(device)
-    else:
-        device.is_activated = True
-        device.key_assigned = req.key
-        device.ip_address = ip
-        
-    db.commit()
-    
-    return {
-        "status": "success", 
-        "hide_ui": True, 
-        "message": "Kích hoạt thành công!"
     }
 
 if __name__ == "__main__":
