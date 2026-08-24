@@ -9,9 +9,6 @@ from sqlalchemy.orm import declarative_base, sessionmaker, Session
 # ==========================================
 # CẤU HÌNH DATABASE (SQLAlchemy)
 # ==========================================
-# Mặc định sử dụng SQLite. Nếu muốn dùng PostgreSQL trên Render/Koyeb,
-# thay thế bằng URL của PostgreSQL, ví dụ: 
-# SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@host/db")
 SQLALCHEMY_DATABASE_URL = "sqlite:///./devices.db"
 
 engine = create_engine(
@@ -34,7 +31,6 @@ class Device(Base):
     key_assigned = Column(String, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-# Tự động tạo bảng nếu chưa có
 Base.metadata.create_all(bind=engine)
 
 # ==========================================
@@ -42,7 +38,6 @@ Base.metadata.create_all(bind=engine)
 # ==========================================
 app = FastAPI(title="Android WebView API")
 
-# Cấu hình CORS để Android WebView gọi API không bị lỗi Cross-Origin
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -51,7 +46,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Dependency lấy session DB
 def get_db():
     db = SessionLocal()
     try:
@@ -59,7 +53,6 @@ def get_db():
     finally:
         db.close()
 
-# Hàm hỗ trợ lấy IP thực từ Request (Xử lý khi qua Proxy/Load Balancer)
 def get_client_ip(request: Request) -> str:
     x_forwarded_for = request.headers.get("x-forwarded-for")
     if x_forwarded_for:
@@ -67,7 +60,7 @@ def get_client_ip(request: Request) -> str:
     return request.client.host
 
 # ==========================================
-# PYDANTIC SCHEMAS (Validation đầu vào)
+# PYDANTIC SCHEMAS
 # ==========================================
 class TrackRequest(BaseModel):
     device_id: str
@@ -79,7 +72,6 @@ class ActivateRequest(BaseModel):
     device_id: str
     key: str
 
-# Danh sách Key hợp lệ (Có thể đưa vào DB hoặc File .env trong thực tế)
 VALID_KEYS = ["PREMIUM2026", "VIP_UNLOCK"]
 
 # ==========================================
@@ -89,11 +81,9 @@ VALID_KEYS = ["PREMIUM2026", "VIP_UNLOCK"]
 @app.post("/api/track-download")
 def track_download(req: TrackRequest, request: Request, db: Session = Depends(get_db)):
     ip = get_client_ip(request)
-    
     device = db.query(Device).filter(Device.device_id == req.device_id).first()
     
     if not device:
-        # Nếu chưa có -> Tạo mới và gán 1 lần tải
         device = Device(
             device_id=req.device_id,
             ip_address=ip,
@@ -101,7 +91,6 @@ def track_download(req: TrackRequest, request: Request, db: Session = Depends(ge
         )
         db.add(device)
     else:
-        # Đã có -> Cộng dồn và cập nhật IP mới nhất
         device.total_downloads += 1
         device.ip_address = ip
         
@@ -115,11 +104,7 @@ def track_download(req: TrackRequest, request: Request, db: Session = Depends(ge
 @app.post("/api/check-status")
 def check_status(req: StatusRequest, request: Request, db: Session = Depends(get_db)):
     ip = get_client_ip(request)
-    
-    # Lấy thông tin thiết bị theo device_id
     device = db.query(Device).filter(Device.device_id == req.device_id).first()
-    
-    # Kiểm tra xem có thiết bị nào khác cùng IP đã được kích hoạt chưa
     ip_activated = db.query(Device).filter(Device.ip_address == ip, Device.is_activated == True).first()
     
     is_activated = False
@@ -141,7 +126,6 @@ def check_status(req: StatusRequest, request: Request, db: Session = Depends(get
 
 @app.post("/api/activate")
 def activate(req: ActivateRequest, request: Request, db: Session = Depends(get_db)):
-    # 1. Kiểm tra Key có hợp lệ không
     if req.key not in VALID_KEYS:
         raise HTTPException(status_code=400, detail="Mã Key không hợp lệ hoặc đã hết hạn!")
         
@@ -149,7 +133,6 @@ def activate(req: ActivateRequest, request: Request, db: Session = Depends(get_d
     device = db.query(Device).filter(Device.device_id == req.device_id).first()
     
     if not device:
-        # Trường hợp thiết bị chưa phát sinh total_downloads nhưng bấm kích hoạt luôn
         device = Device(
             device_id=req.device_id,
             ip_address=ip,
@@ -158,7 +141,6 @@ def activate(req: ActivateRequest, request: Request, db: Session = Depends(get_d
         )
         db.add(device)
     else:
-        # Cập nhật trạng thái kích hoạt
         device.is_activated = True
         device.key_assigned = req.key
         device.ip_address = ip
@@ -171,11 +153,7 @@ def activate(req: ActivateRequest, request: Request, db: Session = Depends(get_d
         "message": "Kích hoạt thành công!"
     }
 
-# ==========================================
-# KHỞI ĐỘNG SERVER (Dành cho Local hoặc VPS)
-# ==========================================
 if __name__ == "__main__":
     import uvicorn
-    # Nhận biến môi trường PORT từ các hosting như Render, Koyeb. Mặc định 8000
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
