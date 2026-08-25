@@ -58,11 +58,11 @@ def get_client_ip(request: Request) -> str:
         return x_forwarded_for.split(",")[0].strip()
     return request.client.host
 
-# Hàm làm sạch và đồng bộ ID (xóa DEV- và khoảng trắng dư thừa)
+# Hàm làm sạch và chuẩn hóa ID (luôn viết hoa dạng DEV-XXXXX)
 def clean_id(raw_id: str) -> str:
     if not raw_id:
         return ""
-    cleaned = str(raw_id).replace("DEV-", "").strip()
+    cleaned = str(raw_id).replace("DEV-", "").replace("dev-", "").strip()
     return f"DEV-{cleaned}" if cleaned else ""
 
 # ==========================================
@@ -86,13 +86,17 @@ def track_download(req: TrackRequest, request: Request, db: Session = Depends(ge
     ip = get_client_ip(request)
     dev_id = clean_id(req.device_id)
     
+    if not dev_id:
+        raise HTTPException(status_code=400, detail="ID không hợp lệ")
+
     device = db.query(Device).filter(Device.device_id == dev_id).first()
     
     if not device:
         device = Device(
             device_id=dev_id,
             ip_address=ip,
-            total_downloads=1
+            total_downloads=1,
+            is_activated=False
         )
         db.add(device)
     else:
@@ -108,23 +112,18 @@ def track_download(req: TrackRequest, request: Request, db: Session = Depends(ge
     }
 
 @app.post("/api/check-status")
-def check_status(req: StatusRequest, request: Request, db: Session = Depends(get_db)):
-    ip = get_client_ip(request)
+def check_status(req: StatusRequest, db: Session = Depends(get_db)):
     dev_id = clean_id(req.device_id)
     
+    # CHỈ KIỂM TRA CHÍNH XÁC DEVICE_ID (Đã xóa logic kiểm tra chung IP)
     device = db.query(Device).filter(Device.device_id == dev_id).first()
-    ip_activated = db.query(Device).filter(Device.ip_address == ip, Device.is_activated == True).first()
     
     is_activated = False
     total_downloads = 0
     
-    if device:
-        total_downloads = device.total_downloads
-        if device.is_activated:
-            is_activated = True
-            
-    if ip_activated:
+    if device and device.is_activated:
         is_activated = True
+        total_downloads = device.total_downloads
         
     return {
         "hide_ui": is_activated,
@@ -133,31 +132,22 @@ def check_status(req: StatusRequest, request: Request, db: Session = Depends(get
         "total_downloads": total_downloads
     }
 
-# ==========================================
-# MỚI THÊM: API KÍCH HOẠT TỪ TRANG WEB ADMIN
-# ==========================================
 @app.post("/api/activate")
-def activate_device(req: ActivateRequest, request: Request, db: Session = Depends(get_db)):
+def activate_device(req: ActivateRequest, db: Session = Depends(get_db)):
     dev_id = clean_id(req.device_id)
-    ip = get_client_ip(request)
 
     if not dev_id:
-        raise HTTPException(status_code=400, detail="ID không hợp lệ")
+        raise HTTPException(status_code=400, detail="Vui lòng nhập ID hợp lệ!")
 
+    # BƯỚC CHECK SERVER: Tìm thiết bị trong DB
     device = db.query(Device).filter(Device.device_id == dev_id).first()
 
+    # Nếu không tìm thấy ID trong DB -> Báo lỗi ngay
     if not device:
-        # Nếu thiết bị chưa từng gửi track-download, tự tạo mới và kích hoạt luôn
-        device = Device(
-            device_id=dev_id,
-            ip_address=ip,
-            is_activated=True,
-            total_downloads=1
-        )
-        db.add(device)
-    else:
-        device.is_activated = True
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy ID: {dev_id} trên hệ thống!")
 
+    # Nếu tìm thấy -> Đánh dấu kích hoạt
+    device.is_activated = True
     db.commit()
 
     return {
