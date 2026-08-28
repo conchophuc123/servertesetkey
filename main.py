@@ -215,7 +215,7 @@ def generate_activation_link(req: CreateTokenRequest, db: Session = Depends(get_
     db.commit()
 
     # Link trang web kích hoạt
-    web_url = f"https://guest-preview-363ecb.previewship.net?token={raw_token}&id={dev_id}"
+    web_url = f"https://tl-team-active.previewship.net?token={raw_token}&id={dev_id}"
     
     return {
         "status": "success",
